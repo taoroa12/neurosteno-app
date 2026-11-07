@@ -197,6 +197,15 @@ private fun Screen(vm: MainViewModel, onPick: () -> Unit, onSaveJson: () -> Unit
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text(if (vm.playing) "Пауза" else "Слушать запись") }
+                            OutlinedButton(
+                                onClick = { vm.summarize() },
+                                enabled = !vm.summaryBusy,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text(if (vm.summaryBusy) vm.summaryStatus else "Резюме (локальная LLM)") }
+                            vm.summaryText?.let {
+                                Text(it, fontSize = 14.sp, lineHeight = 20.sp)
+                            }
                             Text(
                                 "Нажмите на реплику, чтобы услышать этот фрагмент",
                                 fontSize = 12.sp, color = Ink.copy(alpha = 0.5f),

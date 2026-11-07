@@ -10,7 +10,7 @@ android {
     }
 
     androidResources {
-        noCompress += listOf("onnx", "txt")
+        noCompress += listOf("onnx", "txt", "task")
     }
 
     defaultConfig {
@@ -59,4 +59,5 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(files("libs/sherpa-onnx-2.0.1.aar"))
+    implementation("com.google.mediapipe:tasks-genai:0.10.24")
 }

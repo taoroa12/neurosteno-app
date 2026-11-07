@@ -33,6 +33,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var error by mutableStateOf<String?>(null)
         private set
 
+    /** Резюме от локальной LLM. */
+    var summaryText by mutableStateOf<String?>(null)
+        private set
+    var summaryBusy by mutableStateOf(false)
+        private set
+    var summaryStatus by mutableStateOf("")
+        private set
+
     /** Число говорящих: -1 значит определять автоматически. */
     var speakers by mutableStateOf(-1)
 
@@ -70,11 +78,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun transcribe(uri: Uri) {
         val e = engine ?: return
-        if (busy) return
+        if (busy || summaryBusy) return
         releasePlayer()
         busy = true
         error = null
         result = null
+        summaryText = null
         progress = 0f
         stage = "Читаю аудио"
         fileName = queryName(uri)
@@ -102,6 +111,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 error = t.message ?: t.toString()
             } finally {
                 busy = false
+            }
+        }
+    }
+
+    /** Краткое резюме разговора локальной LLM. Запускается по кнопке, после расшифровки. */
+    fun summarize() {
+        val r = result ?: return
+        if (summaryBusy || busy) return
+        summaryBusy = true
+        summaryText = null
+        summaryStatus = "Готовлю модель…"
+        thread {
+            try {
+                summaryText = Summarizer(getApplication()).summarize(r.utterances) { summaryStatus = it }
+            } catch (t: Throwable) {
+                summaryText = "Не удалось сделать резюме: ${t.message ?: t}"
+            } finally {
+                summaryBusy = false
             }
         }
     }

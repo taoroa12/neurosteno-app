@@ -19,8 +19,9 @@ import kotlin.math.min
 /**
  * Весь пайплайн работает на устройстве, без сети:
  *  1. диаризация (pyannote segmentation + эмбеддинги говорящих + кластеризация),
- *  2. объединение близких отрезков одного говорящего в реплики,
- *  3. распознавание каждой реплики моделью GigaM v3 (CTC, со знаками препинания).
+ *     в автоматическом режиме при слишком большом числе говорящих выполняется уточнение,
+ *  2. объединение близких отрезков одного говорящего в реплики и разрешение перекрытий,
+ *  3. распознавание каждой реплики моделью GigaAM v3 (CTC, со знаками препинания).
  */
 class SpeechEngine(context: Context) {
 
@@ -38,7 +39,7 @@ class SpeechEngine(context: Context) {
             model = "models/emb/model.onnx",
             numThreads = threads,
         ),
-        clustering = FastClusteringConfig(numClusters = -1, threshold = CLUSTER_THRESHOLD),
+        clustering = FastClusteringConfig(numClusters = -1, threshold = THRESHOLD_FIRST),
         minDurationOn = 0.2f,
         minDurationOff = 0.5f,
     )
@@ -58,6 +59,13 @@ class SpeechEngine(context: Context) {
         ),
     )
 
+    private fun runDiarization(samples: FloatArray, clusters: Int, threshold: Float) = run {
+        diarizer.setConfig(
+            diarConfig.copy(clustering = FastClusteringConfig(numClusters = clusters, threshold = threshold))
+        )
+        diarizer.process(samples).sortedBy { it.start }
+    }
+
     /**
      * @param numSpeakers число говорящих, если оно известно; -1 значит определить автоматически.
      * @param progress доля выполненной работы 0..1 и название этапа.
@@ -70,13 +78,18 @@ class SpeechEngine(context: Context) {
         normalizeLoudness(samples)
 
         // 1. Диаризация (без колбэка: лямбда-колбэк роняет нативную библиотеку)
-        diarizer.setConfig(
-            diarConfig.copy(
-                clustering = FastClusteringConfig(numClusters = numSpeakers, threshold = CLUSTER_THRESHOLD)
-            )
-        )
         progress(0.02f, "Определяю говорящих")
-        val segments = diarizer.process(samples).sortedBy { it.start }
+        var segments = runDiarization(samples, numSpeakers, THRESHOLD_FIRST)
+
+        if (numSpeakers <= 0 && segments.map { it.speaker }.distinct().size > MAX_AUTO_SPEAKERS) {
+            // Слишком много говорящих: один голос раздробился. Не больше двух уточнений.
+            progress(0.15f, "Уточняю говорящих")
+            segments = runDiarization(samples, -1, THRESHOLD_SECOND)
+            if (segments.map { it.speaker }.distinct().size > MAX_AUTO_SPEAKERS) {
+                progress(0.25f, "Уточняю говорящих")
+                segments = runDiarization(samples, FALLBACK_SPEAKERS, THRESHOLD_SECOND)
+            }
+        }
         progress(DIARIZATION_SHARE, "Определяю говорящих")
 
         // 2. Склейка соседних отрезков одного говорящего
@@ -89,6 +102,17 @@ class SpeechEngine(context: Context) {
                 turns.add(Turn(seg.speaker, seg.start, seg.end))
             }
         }
+
+        // Перекрытие реплик разных говорящих делим пополам, чтобы один звук не попал в две реплики
+        for (i in 0 until turns.size - 1) {
+            val a = turns[i]
+            val b = turns[i + 1]
+            if (a.speaker != b.speaker && a.end > b.start) {
+                val mid = (b.start + min(a.end, b.end)) / 2f
+                a.end = mid
+                b.start = mid
+            }
+        }
         turns.removeAll { it.end - it.start < MIN_TURN_SEC }
 
         // Номера говорящих по порядку появления: первый заговоривший = speaker_1
@@ -98,11 +122,17 @@ class SpeechEngine(context: Context) {
         // 3. Распознавание
         val totalSec = samples.size.toFloat() / SR
         val result = ArrayList<Utterance>()
-        for (t in turns) {
-            val from = ((t.start - PAD_SEC) * SR).toInt().coerceAtLeast(0)
-            val to = ((t.end + PAD_SEC) * SR).toInt().coerceAtMost(samples.size)
+        for ((idx, t) in turns.withIndex()) {
+            val prevEnd = if (idx > 0) turns[idx - 1].end else t.start - PAD_SEC
+            val nextStart = if (idx < turns.size - 1) turns[idx + 1].start else t.end + PAD_SEC
+            // запас по краям не заходит на соседнюю реплику
+            val lo = max(t.start - PAD_SEC, (prevEnd + t.start) / 2f)
+            val hi = min(t.end + PAD_SEC, (t.end + nextStart) / 2f)
+            val from = (lo * SR).toInt().coerceAtLeast(0)
+            val to = (hi * SR).toInt().coerceAtMost(samples.size)
+
             val text = recognizeRange(samples, from, to)
-            if (text.isNotBlank()) {
+            if (text.count { it.isLetterOrDigit() } >= 2) {
                 result.add(
                     Utterance(
                         speaker = order.getValue(t.speaker),
@@ -181,10 +211,13 @@ class SpeechEngine(context: Context) {
 
     companion object {
         private const val SR = 16000
-        private const val CLUSTER_THRESHOLD = 0.5f
+        private const val THRESHOLD_FIRST = 0.5f
+        private const val THRESHOLD_SECOND = 0.85f
+        private const val MAX_AUTO_SPEAKERS = 5
+        private const val FALLBACK_SPEAKERS = 3
         private const val DIARIZATION_SHARE = 0.35f
         private const val MERGE_GAP_SEC = 0.8f
-        private const val MIN_TURN_SEC = 0.3f
+        private const val MIN_TURN_SEC = 0.45f
         private const val PAD_SEC = 0.15f
         private const val MAX_CHUNK_SEC = 20f
         private const val MIN_CHUNK_SAMPLES = SR / 5
