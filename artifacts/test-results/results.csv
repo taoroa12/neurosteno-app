@@ -1,3 +1,5 @@
-test_id,timestamp_utc,commit,file_name,file_size_bytes,duration_seconds,distance_meters,noise_condition,noise_level_db,attempt,success,checksum_match,device_tx,device_rx,notes
-example-001,2026-01-01T00:00:00Z,replace-me,sample.txt,128,1.23,1.0,quiet-room,35,1,true,true,replace-me,replace-me,DELETE THIS EXAMPLE ROW
-
+test_id,file_name,duration_seconds,description,speakers_expected,speakers_detected,processing_seconds,rtf,device,notes
+t1,Запись.m4a,17,реальная речь,2,2,4.1,0.23,emulator x86_64 4GB,
+t2,Дело_о_трёх_банках_сметаны.mp3,102,чистая синтетика,2,2,49.7,0.49,emulator x86_64 4GB,первый запуск после установки: 92.5 с / 0.90
+t3,Смена_с_двух_до_шести.mp3,178,синтетика низкого качества с музыкой,3,3,130.7,0.73,emulator x86_64 4GB,с уточнением диаризации
+t4,Встреча_в_десять.mp3,137,синтетика низкого качества с музыкой,2,7,41.0,0.30,emulator x86_64 4GB,до исправления диаризации
